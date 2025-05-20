@@ -4,20 +4,24 @@
 USER="api-user"
 PASS="api-pass"
 
-# Mail Contact
-MY_MAIL="user@example.org"
-
 # Hostnamen oder IPs der Icinga2 Master
 MASTERS=("icinga-master1.local" "icinga-master2.local")
 
-# API-Endpunkt (Service Health als Beispiel)
+# API-Endpunkt
 ENDPOINT="/v1/status"
 
-# Optional: Logfile
+# Logfile
 LOGFILE="/var/log/icinga_master_check.log"
+
+# E-Mail-Empfänger
+MAILTO="admin@example.com"
 
 # Aktuelles Datum
 DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Zähler für erreichbare Master
+reachable=0
+unreachable_hosts=()
 
 echo "[$DATE] Starting Icinga2 master check..." >> "$LOGFILE"
 
@@ -26,20 +30,35 @@ for HOST in "${MASTERS[@]}"; do
 
     RESPONSE=$(curl -s -k -u "$USER:$PASS" "https://$HOST:5665$ENDPOINT")
 
-    if [[ $? -ne 0 ]]; then
+    if [[ $? -ne 0 || -z "$RESPONSE" ]]; then
         echo "[$DATE] ERROR: Could not connect to $HOST" >> "$LOGFILE"
+        unreachable_hosts+=("$HOST")
         continue
     fi
 
-    # Prüfen, ob Icinga korrekt antwortet
     HEALTH=$(echo "$RESPONSE" | jq -r '.icingaapplication.status')
 
     if [[ "$HEALTH" == "Connected" || "$HEALTH" == "Up" ]]; then
         echo "[$DATE] $HOST is healthy. Status: $HEALTH" >> "$LOGFILE"
+        ((reachable++))
     else
-        echo "[$DATE] WARNING: $HOST returned status: $HEALTH" >> "$LOGFILE"
+        echo "[$DATE] WARNING: $HOST returned unhealthy status: $HEALTH" >> "$LOGFILE"
+        unreachable_hosts+=("$HOST")
     fi
 done
 
-
+# Ergebnis prüfen und ggf. E-Mail senden
+if [[ $reachable -eq 0 ]]; then
+    SUBJECT="CRITICAL: Beide Icinga2 Master nicht erreichbar"
+    BODY="[$DATE] Kritischer Fehler: Keiner der Icinga2 Master (${MASTERS[*]}) ist erreichbar."
+    echo "$BODY" | mail -s "$SUBJECT" "$MAILTO"
+    echo "[$DATE] CRITICAL alert sent to $MAILTO" >> "$LOGFILE"
+elif [[ $reachable -eq 1 ]]; then
+    SUBJECT="WARNING: Ein Icinga2 Master nicht erreichbar"
+    BODY="[$DATE] Warnung: Folgende(r) Master ist/sind nicht erreichbar: ${unreachable_hosts[*]}"
+    echo "$BODY" | mail -s "$SUBJECT" "$MAILTO"
+    echo "[$DATE] WARNING alert sent to $MAILTO" >> "$LOGFILE"
+else
+    echo "[$DATE] OK: Beide Icinga2 Master erreichbar." >> "$LOGFILE"
+fi
 
