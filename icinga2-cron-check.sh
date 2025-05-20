@@ -5,7 +5,7 @@ USER="api-user"
 PASS="api-pass"
 
 # Hostnamen oder IPs der Icinga2 Master
-MASTERS=("icinga-master1.local" "icinga-master2.local")
+MASTERS=("master1.local" "master2.local")
 
 # API-Endpunkt
 ENDPOINT="/v1/status"
@@ -14,7 +14,8 @@ ENDPOINT="/v1/status"
 LOGFILE="/var/log/icinga_master_check.log"
 
 # E-Mail-Empfänger
-MAILTO="admin@example.com"
+MAILTO="recipient@example.com"
+MAILFROM="icinga2i@example.com"
 
 # Aktuelles Datum
 DATE=$(date '+%Y-%m-%d %H:%M:%S')
@@ -35,11 +36,9 @@ for HOST in "${MASTERS[@]}"; do
         unreachable_hosts+=("$HOST")
         continue
     fi
-
-    HEALTH=$(echo "$RESPONSE" | jq -r '.icingaapplication.status')
-
-    if [[ "$HEALTH" == "Connected" || "$HEALTH" == "Up" ]]; then
-        echo "[$DATE] $HOST is healthy. Status: $HEALTH" >> "$LOGFILE"
+    HEALTH=$(echo "$RESPONSE" | jq 'tostring | contains("ApiListener")')
+    if [[ "$HEALTH" == "true" ]]; then
+        echo "[$DATE] $HOST is healthy. Status: Up" >> "$LOGFILE"
         ((reachable++))
     else
         echo "[$DATE] WARNING: $HOST returned unhealthy status: $HEALTH" >> "$LOGFILE"
@@ -51,12 +50,12 @@ done
 if [[ $reachable -eq 0 ]]; then
     SUBJECT="CRITICAL: Beide Icinga2 Master nicht erreichbar"
     BODY="[$DATE] Kritischer Fehler: Keiner der Icinga2 Master (${MASTERS[*]}) ist erreichbar."
-    echo "$BODY" | mail -s "$SUBJECT" "$MAILTO"
+    echo "$BODY" | mail -s "$SUBJECT" -r "$MAILFROM" "$MAILTO"
     echo "[$DATE] CRITICAL alert sent to $MAILTO" >> "$LOGFILE"
 elif [[ $reachable -eq 1 ]]; then
     SUBJECT="WARNING: Ein Icinga2 Master nicht erreichbar"
     BODY="[$DATE] Warnung: Folgende(r) Master ist/sind nicht erreichbar: ${unreachable_hosts[*]}"
-    echo "$BODY" | mail -s "$SUBJECT" "$MAILTO"
+    echo "$BODY" | mail -s "$SUBJECT" -r "$MAILFROM" "$MAILTO"
     echo "[$DATE] WARNING alert sent to $MAILTO" >> "$LOGFILE"
 else
     echo "[$DATE] OK: Beide Icinga2 Master erreichbar." >> "$LOGFILE"
